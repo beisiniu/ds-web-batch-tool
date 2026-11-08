@@ -1,0 +1,20 @@
+.venv/
+browser-profile*/
+tasks/
+output/
+output_scholars/
+accounts.yaml
+config.yaml
+docs/
+tests/_*.csv
+tests/_*.yaml
+__pycache__/
+*.pyc
+*.token
+token*.txt
+ds token.txt
+.env
+_page.html
+_main.js
+_vendors.js
+_i18n.txt
