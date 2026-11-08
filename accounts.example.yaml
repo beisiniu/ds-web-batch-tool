@@ -1,0 +1,12 @@
+# 复制本文件为 accounts.yaml 后使用（accounts.yaml 已在 .gitignore 中，不会被提交）。
+# 每个账号一个独立的 Chrome 配置目录；token 在各 profile 里，不写在这里。
+accounts:
+  enabled: true
+  stuck_switch_sec: 300
+  account_cooldown_sec: 600
+  switch_on_rate_limit_after: 0
+  profiles:
+    - name: "主账号"
+      profile_dir: "browser-profile"
+    - name: "备用账号"
+      profile_dir: "browser-profile-account2"
