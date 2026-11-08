@@ -1,0 +1,73 @@
+input:
+  file: C:/path/to/your/scholars.xlsx
+  sheet: 0
+  column: 姓名
+  has_header: true
+output:
+  dir: output_scholars
+  json_name: 学者信息.json
+  csv_name: 学者信息.csv
+browser:
+  no_proxy: true
+batch:
+  size: 30
+  rotate_every_batches: 8
+  max_attempts: 3
+  split_on_parse_failure: true
+  cooldown_sec:
+  - 10
+  - 30
+deepseek:
+  conversation_url: ''
+  send_preamble: auto
+  response_timeout_sec: 1200
+  login_wait_sec: 900
+  verification_wait_sec: 900
+network:
+  rate_limit_backoff_sec:
+  - 60
+  - 180
+  - 600
+  - 1800
+  max_rate_limit_retries: 6
+  max_total_cooldown_sec: 7200
+fields:
+- name
+- institution
+- homepage
+- research_area
+- source_notes
+match_field: name
+preamble: '你是一名学术信息核查助手。接下来我会分批发给你一批学者姓名（每批约 {batch_size} 个），请逐人核查其公开学术信息。
+
+
+  对每位学者，输出以下 5 个字段：
+
+  1. name：姓名，原样保留我给出的写法
+
+  2. institution：当前任职机构（院系/实验室尽量写全）
+
+  3. homepage：个人主页或机构师资页 URL；没有则填主要学术档案页（如 Google Scholar、ORCID）URL
+
+  4. research_area：研究方向，用分号分隔
+
+  5. source_notes：判断依据与备注；同名学者必须写明如何区分
+
+
+  输出规则：
+
+  - 只输出一个 JSON 数组，不要输出解释、前言、总结
+
+  - 数组元素数量必须与我给出的姓名数量完全一致，顺序一致
+
+  - 每个元素必须包含且只包含上述 5 个字段
+
+  - 无法确认的信息用空字符串 ""，绝对不要编造
+
+  '
+batch_header: '下面是第 {batch_no} 批，共 {count} 位学者（整个任务共 {total} 位）。请严格按照约定输出 JSON 数组，不要解释，顺序与下列姓名一致：
+
+  '
+retry_note: '注意：你上一次的输出无法被解析为完整 JSON 数组。请重新输出本批全部结果，只输出 JSON 数组本身，不要任何解释。
+
+  '
