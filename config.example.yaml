@@ -1,0 +1,75 @@
+input:
+  file: C:/path/to/your/journals.xlsx
+  sheet: 0
+  column: 期刊名
+  has_header: true
+output:
+  dir: output
+  json_name: 期刊元数据.json
+  csv_name: 期刊元数据.csv
+browser:
+  channel: chrome
+  profile_dir: browser-profile
+  no_proxy: true
+  close_stale: true
+batch:
+  size: 50
+  rotate_every_batches: 8
+  max_attempts: 3
+  split_on_parse_failure: true
+  cooldown_sec:
+  - 8
+  - 25
+deepseek:
+  conversation_url: ''
+  send_preamble: auto
+  response_timeout_sec: 1200
+  login_wait_sec: 900
+  verification_wait_sec: 900
+network:
+  rate_limit_backoff_sec:
+  - 60
+  - 180
+  - 600
+  - 1800
+  max_rate_limit_retries: 6
+  max_total_cooldown_sec: 7200
+fields:
+- journal_name
+- official_url
+- provider
+- source_notes
+match_field: journal_name
+preamble: '你是一名严谨的期刊信息核查助手。接下来我会分批发给你一批期刊名称（每批约 {batch_size} 个），请逐本核查并整理元数据。
+
+
+  对每本期刊，输出以下 4 个字段：
+
+  1. journal_name：期刊名称，必须原样保留我给出的名称，不要翻译、改写、增删括号
+
+  2. official_url：期刊官方网站或主办单位官网 URL；确实没有独立官网时，填写主要收录/采编平台（知网、万方、维普等）的 URL
+
+  3. provider：对应的网站供应商/出版平台/收录平台，例如 自有官网、Springer、中国知网、维普、万方、期刊采编平台
+
+  4. source_notes：判断依据与备注；如果存在同名不同刊、更名、无独立官网等情况，必须写明
+
+
+  输出规则：
+
+  - 只输出一个 JSON 数组，不要输出解释、前言、总结
+
+  - 数组元素数量必须与我给出的名称数量完全一致，顺序一致
+
+  - 每个元素必须包含且只包含上述 4 个字段，字段名用英文双引号
+
+  - 无法确认的信息用空字符串 ""，绝对不要编造 URL
+
+  - 可以把 JSON 放在 ```json 代码块中
+
+  '
+batch_header: '下面是第 {batch_no} 批，共 {count} 个期刊（整个任务共 {total} 个）。请严格按照约定输出 JSON 数组，不要解释，顺序与下列名称一致：
+
+  '
+retry_note: '注意：你上一次的输出无法被解析为完整 JSON 数组。请重新输出本批全部结果，只输出 JSON 数组本身（可以放在 ```json 代码块中），不要任何解释。
+
+  '
