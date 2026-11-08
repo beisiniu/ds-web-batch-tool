@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="app-token" content="__APP_TOKEN__">
+  <title>DeepSeek 批量信息采集</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">DS</div>
+      <div>
+        <div class="brand-name">批量信息采集</div>
+        <div class="brand-sub">DeepSeek 网页版</div>
+      </div>
+    </div>
+    <button class="btn primary wide" id="newTaskBtn">新建任务</button>
+    <div class="list-label">任务列表</div>
+    <div id="taskList" class="task-list">
+      <div class="task-empty">还没有任务</div>
+    </div>
+    <div class="sidebar-foot">
+      <div id="sessionPill" class="pill muted">登录状态未检测</div>
+      <button class="btn ghost wide" id="openLoginBtn">登录设置</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">新建采集任务</h1>
+        <p id="pageSub">上传名单，配置字段，剩下的交给脚本</p>
+      </div>
+      <div class="top-right">
+        <span id="accountPill" class="pill muted">账号：—</span>
+        <span id="jobPill" class="pill muted">未运行</span>
+      </div>
+    </header>
+
+    <div id="sessionCallout" class="callout hidden">
+      <div>
+        <b>还没有导入登录状态</b>
+        <span>第一次使用需要从你日常的 Chrome 里导入一次，之后不用再登录。</span>
+      </div>
+      <button class="btn soft small" id="calloutLoginBtn">去导入</button>
+    </div>
+
+    <section id="editorView">
+      <div class="hero" id="uploadHero">
+        <div class="hero-icon">↑</div>
+        <h2>先上传名单</h2>
+        <p>Excel / CSV / TXT 都可以。期刊、学者、机构，或任何名称清单都能用。</p>
+        <label class="btn primary" for="fileInput">选择文件</label>
+        <input type="file" id="fileInput" accept=".xlsx,.xlsm,.csv,.txt" hidden>
+        <div class="hero-hint" id="dropZone">也可以直接把文件拖到这里</div>
+      </div>
+
+      <div id="editorBody" class="hidden">
+        <div class="columns">
+          <div class="col">
+            <section class="card">
+              <div class="step-head">
+                <span class="step-no">1</span>
+                <div class="grow">
+                  <h3>名单与列</h3>
+                  <p id="fileSummary">—</p>
+                </div>
+                <button class="btn ghost small" id="reuploadBtn">更换文件</button>
+              </div>
+              <div class="row2">
+                <label class="field" id="sheetField">
+                  <span>工作表</span>
+                  <select id="sheetSelect"></select>
+                </label>
+                <label class="field">
+                  <span>第一行是表头</span>
+                  <span class="switch"><input type="checkbox" id="headerCheck" checked><i></i></span>
+                </label>
+              </div>
+              <label class="field">
+                <span>名称所在列</span>
+                <select id="columnSelect"></select>
+              </label>
+              <div class="table-wrap"><table id="previewTable"></table></div>
+            </section>
+
+            <section class="card">
+              <div class="step-head">
+                <span class="step-no">2</span>
+                <div>
+                  <h3>领域与字段</h3>
+                  <p>选领域会自动带出提示词；字段可以自由增删</p>
+                </div>
+              </div>
+              <div class="domain-row" id="domainRow"></div>
+              <label class="field" id="domainNotesField">
+                <span>补充要求（可选）</span>
+                <textarea id="domainNotes" rows="2" placeholder="例如：优先官网；同名不同刊要区分"></textarea>
+              </label>
+              <label class="field hidden" id="customPromptField">
+                <span>任务提示词（自由领域）</span>
+                <textarea id="customPrompt" rows="5" placeholder="用你自己的话写清楚：这批名单是什么、要查什么、特别注意什么。系统会自动追加字段和格式规则。"></textarea>
+              </label>
+              <div id="fieldRows" class="field-rows"></div>
+              <button class="btn ghost small" id="addFieldBtn">+ 添加字段</button>
+              <label class="field spaced">
+                <span>用哪个字段和输入名称对齐</span>
+                <select id="matchSelect"></select>
+              </label>
+              <p class="micro">字段说明可选；预设已经填好。自由领域必须自己写任务提示词，系统只追加字段和格式规则。</p>
+            </section>
+          </div>
+
+          <div class="col">
+            <section class="card">
+              <div class="step-head">
+                <span class="step-no">3</span>
+                <div>
+                  <h3>运行设置</h3>
+                  <p>每批越大越省请求，但输出更容易被截断</p>
+                </div>
+              </div>
+              <label class="field">
+                <span>任务名称</span>
+                <input id="taskName" type="text" placeholder="例如：期刊元数据" maxlength="80">
+              </label>
+              <div class="row2">
+                <label class="field">
+                  <span>每批条数</span>
+                  <input id="batchSize" type="number" min="1" max="500" value="50">
+                </label>
+                <label class="field">
+                  <span>会话轮换批次</span>
+                  <input id="rotateEvery" type="number" min="0" max="100" value="8">
+                </label>
+              </div>
+              <div class="chips" id="batchChips">
+                <button type="button" data-v="20">20</button>
+                <button type="button" data-v="30">30</button>
+                <button type="button" data-v="50">50</button>
+              </div>
+              <details class="advanced">
+                <summary>高级设置</summary>
+                <label class="field">
+                  <span>指定会话链接（可选）</span>
+                  <input id="conversationUrl" type="text" placeholder="https://chat.deepseek.com/a/chat/s/...">
+                </label>
+                <div class="row2">
+                  <label class="field"><span>批次间最小等待（秒）</span><input id="cooldownMin" type="number" min="0" value="8"></label>
+                  <label class="field"><span>最大等待（秒）</span><input id="cooldownMax" type="number" min="0" value="25"></label>
+                </div>
+              </details>
+              <p class="micro" id="accountPoolHint">账号池：未配置</p>
+            </section>
+
+            <section class="card">
+              <div class="step-head">
+                <span class="step-no">4</span>
+                <div>
+                  <h3>发给 AI 的任务说明</h3>
+                  <p>领域提示词 + 字段 + 系统格式规则，自动拼接</p>
+                </div>
+              </div>
+              <div class="preamble-tools">
+                <button class="btn ghost small" id="regenBtn">重新生成</button>
+                <label class="mini-switch"><input type="checkbox" id="editPreambleCheck"><span>手动编辑</span></label>
+              </div>
+              <pre id="preamblePreview" class="preamble"></pre>
+              <textarea id="preambleEdit" class="hidden" rows="12"></textarea>
+              <p id="preambleEditHint" class="micro hidden">手动编辑后，系统不会再自动追加格式规则；请保留 JSON 数组、数量/顺序、禁止编造等要求。</p>
+            </section>
+
+            <section class="card actions-card">
+              <div class="run-actions">
+                <button class="btn primary" id="saveAndStartBtn">保存并开始</button>
+                <button class="btn soft" id="testRunBtn">试跑 3 条</button>
+                <button class="btn ghost" id="saveOnlyBtn">仅保存</button>
+              </div>
+              <p class="micro">建议先用“试跑 3 条”确认格式，再正式跑全量。</p>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="runView" class="hidden">
+      <div class="card run-card">
+        <div class="run-top">
+          <div>
+            <h2 id="runTitle">任务</h2>
+            <p id="runSub"></p>
+          </div>
+          <div class="run-actions">
+            <button class="btn soft" id="runTestBtn">试跑 3 条</button>
+            <button class="btn primary" id="runStartBtn">开始 / 继续</button>
+            <button class="btn danger" id="runStopBtn">停止</button>
+          </div>
+        </div>
+        <div class="progress-line"><div id="progressFill"></div></div>
+        <div class="stats">
+          <div><b id="statOk">0</b><span>已成功</span></div>
+          <div><b id="statFailed">0</b><span>失败</span></div>
+          <div><b id="statPending">0</b><span>待处理</span></div>
+          <div><b id="statPct">0%</b><span>完成度</span></div>
+        </div>
+      </div>
+
+      <div id="verifyBanner" class="callout hidden">
+        <div>
+          <b>检测到安全验证</b>
+          <span>请在脚本浏览器里完成验证；脚本已暂停发送，完成后会自动继续，不会重复提交本批。</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>实时日志</h3>
+          <span id="jobStateText" class="pill muted">未运行</span>
+        </div>
+        <pre id="logBox" class="console">等待任务开始...</pre>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>结果</h3>
+          <div class="downloads">
+            <button class="btn ghost small" id="refreshExportBtn">刷新结果</button>
+            <a id="dlJson" class="btn ghost small" href="#">下载 JSON</a>
+            <a id="dlCsv" class="btn ghost small" href="#">下载 CSV</a>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="resultTable"></table></div>
+        <p class="micro" id="resultHint"></p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="loginModal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>导入登录状态</h3>
+      <button class="icon-btn" id="closeLoginBtn" type="button">×</button>
+    </div>
+    <p class="micro">在你日常使用的 Chrome 里登录 DeepSeek，然后按下面步骤复制。令牌只在本机使用，不会发到任何服务器。</p>
+    <ol class="steps">
+      <li>在日常 Chrome 打开 <code>chat.deepseek.com</code>，按 <b>F12</b>，切到 <b>Console / 控制台</b>。</li>
+      <li>如果提示不允许粘贴，先在控制台输入 <code>allow pasting</code> 回车。</li>
+      <li>执行下面这行，控制台显示 <code>undefined</code> 就说明复制成功：</li>
+    </ol>
+    <code class="code-line">copy(JSON.stringify({local: {...localStorage}, session: {...sessionStorage}, cookies: document.cookie}))</code>
+    <ol class="steps" start="4">
+      <li>回到这里，点下面的按钮。脚本会从本机剪贴板读取，并打开浏览器验证。</li>
+    </ol>
+    <div class="modal-actions">
+      <button class="btn primary" id="importSessionBtn">从剪贴板导入并验证</button>
+      <span id="importSpinner" class="hidden spinner-text">正在验证，约 10~45 秒...</span>
+    </div>
+    <pre id="importOutput" class="console small hidden"></pre>
+    <a id="importScreenshot" class="link hidden" href="#" target="_blank">查看验证截图</a>
+
+    <div class="account-pool">
+      <div class="pool-head">
+        <b>账号池</b>
+        <span class="micro">任务卡住或限流时会自动切换</span>
+      </div>
+      <div id="accountList" class="account-list"></div>
+      <div class="pool-add">
+        <input id="newAccountName" type="text" placeholder="新账号名称，例如 备用2" maxlength="40">
+        <button class="btn soft small" id="addAccountBtn" type="button">从剪贴板导入并添加</button>
+      </div>
+      <div id="addAccountSpinner" class="spinner-text hidden">正在导入并验证，约 10~45 秒...</div>
+      <pre id="addAccountOutput" class="console small hidden"></pre>
+    </div>
+
+    <p class="micro">令牌等同于登录权限。导入成功后脚本会自动清空剪贴板；不要分享 <code>browser-profile*</code> 目录。</p>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
