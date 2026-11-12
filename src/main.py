@@ -464,6 +464,16 @@ def cmd_check_login(args) -> int:
                 break
             browser.page.wait_for_timeout(1000)
         url = browser.page.url if browser.page else url
+        try:
+            body = browser.page.locator("body").inner_text() if browser.page else ""
+        except Exception:  # noqa: BLE001
+            body = ""
+        limit_words = ("账号已被禁言", "已被禁言至", "账号已被停用", "账号被封禁", "违反用户使用规范")
+        if body:
+            line = next((ln.strip() for ln in body.splitlines() if any(w in ln for w in limit_words)), "")
+            if line:
+                ok = False
+                error = "账号受限：" + line[:160]
     except Exception as exc:  # noqa: BLE001
         error = str(exc)
     finally:

@@ -886,7 +886,9 @@ function renderAccounts() {
         const badge = document.createElement('span');
         badge.className = `account-status ${status.cls}`;
         badge.textContent = status.icon;
-        badge.title = account.checked_at ? `${status.tip}（检查于 ${account.checked_at}）` : status.tip;
+        badge.title = account.checked_at
+          ? `${status.tip}${account.error ? `：${account.error}` : ''}（检查于 ${account.checked_at}）`
+          : `${status.tip}${account.error ? `：${account.error}` : ''}`;
 
         const main = document.createElement('div');
         main.className = 'account-main';

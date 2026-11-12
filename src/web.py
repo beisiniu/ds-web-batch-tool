@@ -576,6 +576,7 @@ def _accounts_payload(accounts: dict | None = None) -> list[dict]:
                 "profile_dir": item["profile_dir"],
                 "ok": entry.get("ok"),
                 "checked_at": entry.get("checked_at", ""),
+                "error": entry.get("error", ""),
             }
         )
     return out
