@@ -191,7 +191,7 @@ def sleep_with_log(seconds: float, logger: logging.Logger) -> None:
         time.sleep(min(60, remain))
 
 
-def ask_with_retry(browser, store, state, cfg, logger, message, label, force_resend=False):
+def ask_with_retry(browser, store, state, cfg, logger, message, label, force_resend=False, expect_json=False):
     waits = list(cfg["network"]["rate_limit_backoff_sec"])
     retries = max(1, int(cfg["network"].get("max_rate_limit_retries", len(waits))))
     waits = waits[:retries]
@@ -203,7 +203,7 @@ def ask_with_retry(browser, store, state, cfg, logger, message, label, force_res
     switch_after = int(accounts_cfg.get("switch_on_rate_limit_after", -1))
     for attempt in range(len(waits) + 1):
         try:
-            return browser.ask(message, label, force_resend=force_resend)
+            return browser.ask(message, label, force_resend=force_resend, expect_json=expect_json)
         except LoginRequired as exc:
             if accounts_enabled:
                 raise SwitchAccountError(f"需要登录：{exc}") from exc
@@ -269,6 +269,7 @@ def process_batch(browser, store, cfg, state, logger, items, batch_no: int, labe
             message,
             label,
             force_resend=(attempt > 1),
+            expect_json=True,
         )
         last_raw = store.save_raw(label, attempt, reply)
 
@@ -444,6 +445,57 @@ def cmd_import_session(args) -> int:
         browser.close()
 
 
+def cmd_check_login(args) -> int:
+    cfg = load_config(args.config)
+    logger = setup_logger(output_dir(cfg))
+    browser = DeepSeekBrowser(cfg, profile_path(cfg), logger)
+    ok = False
+    url = ""
+    error = ""
+    try:
+        browser.start(require_login=False)
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            url = browser.page.url if browser.page else ""
+            if browser._on_login_page():
+                break
+            if browser._input_locator() is not None:
+                ok = True
+                break
+            browser.page.wait_for_timeout(1000)
+        url = browser.page.url if browser.page else url
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+    finally:
+        browser.close()
+    print("__CHECK_RESULT__" + json.dumps({"ok": ok, "url": url, "error": error}, ensure_ascii=False))
+    return 0
+
+
+def cmd_login_watch(args) -> int:
+    cfg = load_config(args.config)
+    logger = setup_logger(output_dir(cfg))
+    browser = DeepSeekBrowser(cfg, profile_path(cfg), logger)
+    ok = False
+    error = ""
+    try:
+        browser.start(require_login=False, prefer_login_page=True)
+        print("__LOGIN_READY__", flush=True)
+        limit = float(cfg["deepseek"].get("login_wait_sec", 900))
+        deadline = time.time() + limit
+        while time.time() < deadline:
+            if browser._input_locator() is not None:
+                ok = True
+                break
+            browser.page.wait_for_timeout(2000)
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+    finally:
+        browser.close()
+    print("__LOGIN_RESULT__" + json.dumps({"ok": ok, "error": error}, ensure_ascii=False), flush=True)
+    return 0
+
+
 def cmd_status(args) -> int:
     cfg = load_config(args.config)
     items, meta = load_items(cfg)
@@ -587,6 +639,31 @@ def _switch_to_next_account(browser, store, cfg, state, logger, reason) -> bool:
     return False
 
 
+def _reload_runtime(cfg: dict) -> None:
+    path = cfg.get("_runtime_path")
+    if not path:
+        return
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return
+    batch = cfg.setdefault("batch", {})
+    size = data.get("size")
+    if isinstance(size, int) and 1 <= size <= 500:
+        batch["size"] = size
+    rotate = data.get("rotate_every_batches")
+    if isinstance(rotate, int) and 0 <= rotate <= 100:
+        batch["rotate_every_batches"] = rotate
+    cooldown = data.get("cooldown_sec")
+    if isinstance(cooldown, list) and len(cooldown) == 2:
+        try:
+            low, high = float(cooldown[0]), float(cooldown[1])
+            if 0 <= low <= high <= 3600:
+                batch["cooldown_sec"] = [low, high]
+        except (TypeError, ValueError):
+            pass
+
+
 def _run_loop(browser, store, cfg, state, logger, pending, items, force_new: bool = False) -> None:
     target = "" if force_new else (state.get("conversation_url") or cfg["deepseek"]["conversation_url"])
     started_new = False
@@ -634,6 +711,9 @@ def _run_loop(browser, store, cfg, state, logger, pending, items, force_new: boo
     rotate_every = int(cfg["batch"]["rotate_every_batches"])
 
     while pending:
+        _reload_runtime(cfg)
+        size = int(cfg["batch"]["size"])
+        rotate_every = int(cfg["batch"]["rotate_every_batches"])
         if rotate_every > 0 and int(state.get("batches_in_conversation", 0)) >= rotate_every:
             logger.info(f"当前会话已发 {rotate_every} 批，新开会话避免上下文超长")
             try:
@@ -872,6 +952,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("login", help="首次登录 DeepSeek")
     sub.add_parser("doctor", help="检查登录后的页面结构")
     sub.add_parser("import-session", help="从剪贴板导入已登录浏览器的 token")
+    sub.add_parser("check-login", help="检查账号登录状态")
+    sub.add_parser("login-watch", help="打开登录窗口并等待登录完成")
 
     run = sub.add_parser("run", help="开始/继续跑任务")
     run.add_argument("--limit", type=int, help="本次最多处理多少条（测试用）")
@@ -910,6 +992,10 @@ def main(argv=None) -> int:
             return cmd_doctor(args)
         if command == "import-session":
             return cmd_import_session(args)
+        if command == "check-login":
+            return cmd_check_login(args)
+        if command == "login-watch":
+            return cmd_login_watch(args)
         if command == "run":
             return cmd_run(args)
         if command == "status":

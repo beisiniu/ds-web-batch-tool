@@ -291,6 +291,11 @@ td { color: #3d4763; }
 .stats b { display: block; font-size: 20px; letter-spacing: -0.02em; }
 .stats span { color: var(--muted); font-size: 11px; }
 
+.run-settings { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; color: var(--muted); }
+.run-settings label { display: flex; align-items: center; gap: 6px; }
+.run-settings input { width: 68px; }
+.run-settings .micro { font-size: 11px; }
+
 .console {
   background: #0d1526; color: #c9d3ea; border-radius: 12px; padding: 14px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -326,8 +331,9 @@ a.btn { text-decoration: none; }
 .link { display: inline-block; margin-top: 10px; font-size: 12px; }
 
 .account-pool { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
-.pool-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.pool-head { display: flex; align-items: center; justify-content: flex-start; gap: 10px; margin-bottom: 10px; }
 .pool-head b { font-size: 14px; }
+.pool-head .btn { margin-left: auto; }
 .account-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .account-item {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -336,6 +342,14 @@ a.btn { text-decoration: none; }
 }
 .account-item b { font-weight: 600; }
 .account-item span { color: var(--muted); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.account-item .account-status {
+  flex: none; width: 16px; text-align: center; font-size: 14px; font-weight: 700; color: #9aa3b2;
+}
+.account-item .account-status.ok { color: #1f9d55; }
+.account-item .account-status.bad { color: #d64545; }
+.account-item .account-status.unknown { color: #9aa3b2; }
+.account-item .btn { flex: none; }
 .pool-add { display: flex; gap: 8px; }
 .pool-add input { flex: 1; }
 

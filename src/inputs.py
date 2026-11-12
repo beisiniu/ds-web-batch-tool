@@ -52,35 +52,36 @@ def _resolve_column(header: list[str], column, has_header: bool) -> int:
 
 
 def _read_xlsx(path: Path, sheet, column, has_header: bool):
-    wb = load_workbook(path, read_only=True, data_only=True)
-    try:
-        if isinstance(sheet, str) and not sheet.isdigit():
-            if sheet not in wb.sheetnames:
-                raise InputError(f"工作表「{sheet}」不存在。现有：{wb.sheetnames}")
-            ws = wb[sheet]
-        else:
-            idx = int(sheet)
-            if idx >= len(wb.worksheets):
-                raise InputError(f"工作表序号 {idx} 超出范围，共 {len(wb.worksheets)} 个")
-            ws = wb.worksheets[idx]
+    with open(path, "rb") as fh:
+        wb = load_workbook(fh, read_only=True, data_only=True)
+        try:
+            if isinstance(sheet, str) and not sheet.isdigit():
+                if sheet not in wb.sheetnames:
+                    raise InputError(f"工作表「{sheet}」不存在。现有：{wb.sheetnames}")
+                ws = wb[sheet]
+            else:
+                idx = int(sheet)
+                if idx >= len(wb.worksheets):
+                    raise InputError(f"工作表序号 {idx} 超出范围，共 {len(wb.worksheets)} 个")
+                ws = wb.worksheets[idx]
 
-        rows = ws.iter_rows(values_only=True)
-        first = next(rows, None)
-        if first is None:
-            return [], []
-        first = list(first)
-        idx = _resolve_column([_clean(x) for x in first], column, has_header)
-        data_rows = rows if has_header else iter([tuple(first), *rows])
-        start_row = 2 if has_header else 1
-        values = []
-        for offset, row in enumerate(data_rows):
-            cell = row[idx] if idx < len(row) else None
-            text = _clean(cell)
-            if text:
-                values.append((start_row + offset, text))
-        return values, [_clean(x) for x in first]
-    finally:
-        wb.close()
+            rows = ws.iter_rows(values_only=True)
+            first = next(rows, None)
+            if first is None:
+                return [], []
+            first = list(first)
+            idx = _resolve_column([_clean(x) for x in first], column, has_header)
+            data_rows = rows if has_header else iter([tuple(first), *rows])
+            start_row = 2 if has_header else 1
+            values = []
+            for offset, row in enumerate(data_rows):
+                cell = row[idx] if idx < len(row) else None
+                text = _clean(cell)
+                if text:
+                    values.append((start_row + offset, text))
+            return values, [_clean(x) for x in first]
+        finally:
+            wb.close()
 
 
 def _detect_encoding(path: Path) -> str:
@@ -113,10 +114,18 @@ def _read_csv(path: Path, column, has_header: bool):
     return values, header
 
 
+def _looks_like_xlsx(path: Path) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"PK\x03\x04"
+    except OSError:
+        return False
+
+
 def load_items(cfg: dict) -> tuple[list[Item], dict]:
     path = Path(cfg["input"]["file"])
     suffix = path.suffix.lower()
-    if suffix in (".xlsx", ".xlsm"):
+    if suffix in (".xlsx", ".xlsm") or (suffix in (".csv", ".txt") and _looks_like_xlsx(path)):
         values, header = _read_xlsx(
             path, cfg["input"].get("sheet", 0), cfg["input"]["column"], bool(cfg["input"]["has_header"])
         )

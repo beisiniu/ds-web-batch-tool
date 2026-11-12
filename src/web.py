@@ -20,17 +20,19 @@ from openpyxl import load_workbook
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from .config import ConfigError, load_config
-from .inputs import InputError, load_items
+from .inputs import InputError, _looks_like_xlsx, load_items
 
 ROOT = Path(__file__).resolve().parent.parent
 TASKS = ROOT / "tasks"
 UPLOADS = TASKS / "_uploads"
 SESSION_DIR = TASKS / "_session"
 PROFILE_DIR = ROOT / "browser-profile"
+ACCOUNT_STATUS = TASKS / "_accounts" / "status.json"
 STATIC = Path(__file__).resolve().parent / "web_static"
 
 APP_TOKEN = secrets.token_urlsafe(24)
 JOB = {"task_id": None, "proc": None, "stopped": False, "log_file": None}
+LOGIN_JOB = {"name": "", "proc": None}
 COUNTS_CACHE: dict = {}
 UPLOAD_RE = re.compile(r"^[0-9a-f]{16}$")
 TASK_RE = re.compile(r"^[0-9A-Za-z_-]{5,40}$")
@@ -65,12 +67,22 @@ SCHOLAR_TEMPLATE = """你是一名严谨的学术信息核查助手。下面是�
 {extra_notes}请对每位学者输出以下字段：
 {fields}"""
 
-INSTITUTION_TEMPLATE = """你是一名严谨的机构信息核查助手。下面是一批机构名称（每批约 {batch_size} 个），请逐个核查公开信息。
+INSTITUTION_TEMPLATE = """你是一名严谨的中国机构信息核查助手。下面是一批机构名称（每批约 {batch_size} 个），请逐个联网核查公开信息，整理成机构档案。
 
-核查重点：
-- 官网优先机构一级域名，避免百科、新闻或第三方黄页
-- 同名机构按国家/地区、机构类型区分，并在备注字段写明
-- 不要编造地址、隶属关系、官网或联系方式
+核查与判定规则：
+- 先用机构全称确认唯一主体，结合省份、城市、机构类型和历史沿革区分同名或近名机构；机构名称必须原样保留，不要改变主体
+- 官网优先机构一级域名或举办单位官网；官网打不开时可参考事业单位登记信息、教育/卫健/民政/科技等主管部门官网、机构官方公众号
+- 严禁按名称猜测：官网、成立时间、地址、电话、邮箱、负责人、隶属关系都须有公开来源；无法确认的字段一律填空字符串
+- 电话、邮箱、邮编必须逐字核对官网「联系我们」等官方页面；不能确认就留空，不要推测或套用相近号码
+- 英文名优先使用官网英文版或官方英文资料中的写法；没有官方英文名时给通用规范译名，不要生造缩写；荣誉尽量列全并保留官方原名称
+- 研究领域、学科方向或主要业务尽量列全，不要只写概括类别
+- 成立日期优先采用批准/批复设立的日期，不要用挂牌或成立大会日期替代
+- 下属机构只填具有独立建制的单位；内设部门、科室、办公室不算下属机构
+- 已撤销、合并或更名的机构：正式更名前使用过的名称写入 name_used（前身/起源机构不算曾用名，可填入 institution_related），变更时间写入 change_date，撤销/停办时间写入 death_date，承接机构写入 is_replaced_by
+- 简介（intro）100~300 字，概括机构性质、隶属、历史沿革、规模与主要职能；不要大段复制原文或写宣传语
+- 多值字段用英文分号加空格「; 」分隔；日期只能写 YYYY 或 YYYY/M/D；不要输出“不详”“未知”，统一留空
+- 所有字段值都输出字符串；数字、邮编、日期同样用字符串
+- 输出中不要出现任何引用标记（如 [reference:0]、[citation:1]）、脚注、网址列表或 markdown 链接
 
 {extra_notes}请对每个机构输出以下字段：
 {fields}"""
@@ -173,7 +185,8 @@ def build_preamble(
         return f"{head}\n\n{CUSTOM_FIELDS_HEADER}\n{fields_text}\n\n{rules}"
     extra = f"补充要求：\n{notes.strip()}\n\n" if notes.strip() else ""
     text = DOMAIN_TEMPLATES[domain].replace("{extra_notes}", extra).replace("{fields}", fields_text)
-    return f"{text.rstrip()}\n\n{rules}"
+    confirm = "收到本说明后请只回复「明白」，不要输出示例数据，等待我发送第一批名称。"
+    return f"{text.rstrip()}\n\n{rules}\n\n{confirm}"
 
 
 def _cell(value) -> str:
@@ -195,22 +208,23 @@ def _detect_encoding(path: Path) -> str:
 
 def _read_table(path: Path, sheet=0, limit: int = 12):
     suffix = path.suffix.lower()
-    if suffix in (".xlsx", ".xlsm"):
-        wb = load_workbook(path, read_only=True, data_only=True)
-        try:
-            sheets = wb.sheetnames
-            if isinstance(sheet, str) and not sheet.isdigit():
-                ws = wb[sheet]
-            else:
-                ws = wb.worksheets[int(sheet)]
-            rows = []
-            for index, row in enumerate(ws.iter_rows(values_only=True)):
-                if index >= limit:
-                    break
-                rows.append([_cell(value) for value in row])
-            return sheets, rows
-        finally:
-            wb.close()
+    if suffix in (".xlsx", ".xlsm") or (suffix in (".csv", ".txt") and _looks_like_xlsx(path)):
+        with open(path, "rb") as fh:
+            wb = load_workbook(fh, read_only=True, data_only=True)
+            try:
+                sheets = wb.sheetnames
+                if isinstance(sheet, str) and not sheet.isdigit():
+                    ws = wb[sheet]
+                else:
+                    ws = wb.worksheets[int(sheet)]
+                rows = []
+                for index, row in enumerate(ws.iter_rows(values_only=True)):
+                    if index >= limit:
+                        break
+                    rows.append([_cell(value) for value in row])
+                return sheets, rows
+            finally:
+                wb.close()
     if suffix in (".csv", ".txt"):
         encoding = _detect_encoding(path)
         with open(path, "r", encoding=encoding, newline="") as f:
@@ -386,8 +400,190 @@ def _save_account_record(name: str, profile_dir: Path) -> None:
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def _account_slug(name: str, index: int) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "", name)
+    return f"{index:02d}-{safe or 'acct'}"
+
+
+def _account_check_config(profile_dir: Path, slug: str) -> Path:
+    folder = TASKS / "_accounts" / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    dummy = folder / "dummy.csv"
+    if not dummy.exists():
+        dummy.write_text("name\n示例\n", encoding="utf-8")
+    config = {
+        "input": {"file": str(dummy), "sheet": 0, "column": "name", "has_header": True},
+        "output": {
+            "dir": str(folder / "output"),
+            "json_name": "result.json",
+            "csv_name": "result.csv",
+        },
+        "browser": {
+            "channel": "chrome",
+            "profile_dir": str(profile_dir),
+            "no_proxy": True,
+            "close_stale": True,
+            "headless": True,
+        },
+        "batch": {
+            "size": 1,
+            "rotate_every_batches": 0,
+            "max_attempts": 1,
+            "split_on_parse_failure": False,
+            "cooldown_sec": [0, 0],
+        },
+        "deepseek": {
+            "conversation_url": "",
+            "send_preamble": "never",
+            "response_timeout_sec": 60,
+            "login_wait_sec": 60,
+            "verification_wait_sec": 60,
+        },
+        "network": {
+            "rate_limit_backoff_sec": [30],
+            "max_rate_limit_retries": 1,
+            "max_total_cooldown_sec": 120,
+        },
+        "fields": ["name"],
+        "match_field": "name",
+        "preamble": "账号登录状态检查，不会发送任何消息。",
+        "batch_header": BATCH_HEADER,
+        "retry_note": RETRY_NOTE,
+    }
+    path = folder / "check.yaml"
+    _write_yaml(path, config)
+    return path
+
+
+def _account_login_config(profile_dir: Path, slug: str) -> Path:
+    folder = TASKS / "_accounts" / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    dummy = folder / "dummy.csv"
+    if not dummy.exists():
+        dummy.write_text("name\n示例\n", encoding="utf-8")
+    config = {
+        "input": {"file": str(dummy), "sheet": 0, "column": "name", "has_header": True},
+        "output": {
+            "dir": str(folder / "output"),
+            "json_name": "result.json",
+            "csv_name": "result.csv",
+        },
+        "browser": {
+            "channel": "chrome",
+            "profile_dir": str(profile_dir),
+            "no_proxy": True,
+            "close_stale": True,
+            "headless": False,
+        },
+        "batch": {
+            "size": 1,
+            "rotate_every_batches": 0,
+            "max_attempts": 1,
+            "split_on_parse_failure": False,
+            "cooldown_sec": [0, 0],
+        },
+        "deepseek": {
+            "conversation_url": "",
+            "send_preamble": "never",
+            "response_timeout_sec": 60,
+            "login_wait_sec": 600,
+            "verification_wait_sec": 600,
+        },
+        "network": {
+            "rate_limit_backoff_sec": [30],
+            "max_rate_limit_retries": 1,
+            "max_total_cooldown_sec": 120,
+        },
+        "fields": ["name"],
+        "match_field": "name",
+        "preamble": "账号直接登录，不会发送任何消息。",
+        "batch_header": BATCH_HEADER,
+        "retry_note": RETRY_NOTE,
+    }
+    path = folder / "login.yaml"
+    _write_yaml(path, config)
+    return path
+
+
+def _run_account_check(name: str, profile_dir: Path, slug: str) -> dict:
+    checked_at = _now()
+    ok = False
+    url = ""
+    error = ""
+    try:
+        config_path = _account_check_config(profile_dir, slug)
+        result = subprocess.run(
+            [sys.executable, "-m", "src.main", "--config", str(config_path), "check-login"],
+            cwd=str(ROOT),
+            capture_output=True,
+            timeout=90,
+        )
+        output = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+        marker = "__CHECK_RESULT__"
+        for line in output.splitlines():
+            if line.startswith(marker):
+                data = json.loads(line[len(marker) :])
+                ok = bool(data.get("ok"))
+                url = str(data.get("url") or "")
+                error = str(data.get("error") or "")
+        if not ok and not error:
+            error = "登录已失效（页面停在登录页）" if "/sign_in" in url else output[-1200:]
+    except subprocess.TimeoutExpired:
+        error = "检查超时"
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+    return {
+        "name": name,
+        "profile_dir": str(profile_dir),
+        "ok": ok,
+        "url": url,
+        "error": error,
+        "checked_at": checked_at,
+    }
+
+
+def _status_key(profile_dir: str | Path) -> str:
+    return str(Path(profile_dir).resolve()).lower()
+
+
+def _load_account_status() -> dict:
+    data = _read_json(ACCOUNT_STATUS, {}) or {}
+    items = data.get("items")
+    return items if isinstance(items, dict) else {}
+
+
+def _save_account_status(results: list[dict], replace: bool = False) -> None:
+    items = {} if replace else _load_account_status()
+    for item in results:
+        items[_status_key(item["profile_dir"])] = {
+            "ok": bool(item["ok"]),
+            "url": item.get("url", ""),
+            "error": item.get("error", ""),
+            "checked_at": item.get("checked_at", _now()),
+        }
+    _write_json(ACCOUNT_STATUS, {"checked_at": _now(), "items": items})
+
+
+def _accounts_payload(accounts: dict | None = None) -> list[dict]:
+    accounts = accounts if accounts is not None else _load_accounts()
+    status = _load_account_status()
+    out = []
+    for item in accounts.get("profiles") or []:
+        entry = status.get(_status_key(item["profile_dir"])) or {}
+        out.append(
+            {
+                "name": item["name"],
+                "profile_dir": item["profile_dir"],
+                "ok": entry.get("ok"),
+                "checked_at": entry.get("checked_at", ""),
+            }
+        )
+    return out
+
+
 def _build_config(task: dict) -> dict:
     return {
+        "_runtime_path": str(_task_dir(task["id"]) / "runtime.json"),
         "input": {
             "file": task["input_file"],
             "sheet": task.get("sheet", 0),
@@ -738,7 +934,18 @@ def start_task(task_id: str):
     try:
         cfg = yaml.safe_load(_config_path(task_id).read_text(encoding="utf-8")) or {}
         cfg["accounts"] = _load_accounts()
+        cfg["_runtime_path"] = str(_task_dir(task_id) / "runtime.json")
         _write_yaml(_config_path(task_id), cfg)
+        _write_json(
+            _task_dir(task_id) / "runtime.json",
+            {
+                "size": int(task.get("batch_size", cfg.get("batch", {}).get("size", 50))),
+                "rotate_every_batches": int(
+                    task.get("rotate_every_batches", cfg.get("batch", {}).get("rotate_every_batches", 8))
+                ),
+                "cooldown_sec": task.get("cooldown_sec", cfg.get("batch", {}).get("cooldown_sec", [8, 25])),
+            },
+        )
     except Exception:  # noqa: BLE001
         app.logger.exception("refresh task accounts failed")
 
@@ -761,6 +968,61 @@ def start_task(task_id: str):
     )
     JOB.update({"task_id": task_id, "proc": proc, "stopped": False, "log_file": log_file})
     return jsonify({"ok": True, "job": "running", "limit": limit or None})
+
+
+@app.post("/api/tasks/<task_id>/settings")
+def update_task_settings(task_id: str):
+    task = _load_task(task_id)
+    if not task:
+        return _api_error("任务不存在", 404)
+    data = request.get_json(silent=True) or {}
+    try:
+        batch_size = int(data.get("batch_size", task.get("batch_size", 50)))
+    except (TypeError, ValueError):
+        return _api_error("每批条数必须是整数")
+    if not 1 <= batch_size <= 500:
+        return _api_error("每批条数需要在 1~500 之间")
+    try:
+        rotate = int(data.get("rotate_every_batches", task.get("rotate_every_batches", 8)))
+    except (TypeError, ValueError):
+        return _api_error("会话轮换批次必须是整数")
+    if not 0 <= rotate <= 100:
+        return _api_error("会话轮换批次需要在 0~100 之间")
+    current = task.get("cooldown_sec") or [8, 25]
+    try:
+        cooldown_min = float(data.get("cooldown_min", current[0]))
+        cooldown_max = float(data.get("cooldown_max", current[1]))
+    except (TypeError, ValueError):
+        return _api_error("批间隔必须是数字")
+    if not 0 <= cooldown_min <= cooldown_max <= 3600:
+        return _api_error("批间隔需要满足 0 <= 最小值 <= 最大值 <= 3600")
+    task.update(
+        {
+            "batch_size": batch_size,
+            "rotate_every_batches": rotate,
+            "cooldown_sec": [cooldown_min, cooldown_max],
+        }
+    )
+    _write_json(_task_dir(task_id) / "task.json", task)
+    config_path = _config_path(task_id)
+    if config_path.exists():
+        try:
+            cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            cfg.setdefault("batch", {})
+            cfg["batch"]["size"] = batch_size
+            cfg["batch"]["rotate_every_batches"] = rotate
+            cfg["batch"]["cooldown_sec"] = [cooldown_min, cooldown_max]
+            cfg["_runtime_path"] = str(_task_dir(task_id) / "runtime.json")
+            _write_yaml(config_path, cfg)
+        except Exception:  # noqa: BLE001
+            app.logger.exception("update task config failed")
+    _write_json(
+        _task_dir(task_id) / "runtime.json",
+        {"size": batch_size, "rotate_every_batches": rotate, "cooldown_sec": [cooldown_min, cooldown_max]},
+    )
+    proc = JOB.get("proc")
+    running = bool(proc is not None and proc.poll() is None and JOB.get("task_id") == task_id)
+    return jsonify({"ok": True, "running": running, "task": task})
 
 
 @app.post("/api/tasks/<task_id>/stop")
@@ -905,10 +1167,7 @@ def list_accounts():
     accounts = _load_accounts()
     return jsonify(
         {
-            "accounts": [
-                {"name": item["name"], "profile_dir": item["profile_dir"]}
-                for item in accounts.get("profiles") or []
-            ],
+            "accounts": _accounts_payload(accounts),
             "settings": {
                 key: value for key, value in accounts.items() if key != "profiles"
             },
@@ -998,16 +1257,142 @@ def add_account():
     ok = result.returncode == 0
     if ok:
         _save_account_record(name, profile)
+        _save_account_status(
+            [
+                {
+                    "name": name,
+                    "profile_dir": str(profile),
+                    "ok": True,
+                    "url": "https://chat.deepseek.com/",
+                    "error": "",
+                    "checked_at": _now(),
+                }
+            ]
+        )
     return jsonify(
         {
             "ok": ok,
             "output": output,
-            "accounts": [
-                {"name": item["name"], "profile_dir": item["profile_dir"]}
-                for item in _load_accounts().get("profiles") or []
-            ],
+            "accounts": _accounts_payload(),
         }
     )
+
+
+@app.post("/api/accounts/check")
+def check_accounts():
+    proc = JOB.get("proc")
+    if proc is not None and proc.poll() is None:
+        return _api_error("任务运行中，先停止任务再检查账号", 409)
+    accounts = _load_accounts()
+    results = []
+    for index, item in enumerate(accounts.get("profiles") or [], 1):
+        results.append(
+            _run_account_check(item["name"], Path(item["profile_dir"]), _account_slug(item["name"], index))
+        )
+    _save_account_status(results, replace=True)
+    return jsonify({"accounts": _accounts_payload(accounts), "checked_at": _now()})
+
+
+@app.post("/api/accounts/update")
+def update_account_token():
+    proc = JOB.get("proc")
+    if proc is not None and proc.poll() is None:
+        return _api_error("任务运行中，先停止任务再更新 token", 409)
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return _api_error("请指定要更新的账号")
+    accounts = _load_accounts()
+    profiles = accounts.get("profiles") or []
+    target = next((item for item in profiles if item["name"] == name), None)
+    if target is None:
+        return _api_error("账号不存在", 404)
+    profile = Path(target["profile_dir"])
+    slug = _account_slug(name, profiles.index(target) + 1)
+    config_path = _account_import_config(profile, slug)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "src.main", "--config", str(config_path), "import-session"],
+            cwd=str(ROOT),
+            capture_output=True,
+            timeout=150,
+        )
+    except subprocess.TimeoutExpired:
+        return jsonify(
+            {
+                "ok": False,
+                "output": "导入超时：请确认剪贴板里已有该账号新的登录信息。",
+                "accounts": _accounts_payload(accounts),
+            }
+        )
+    output = (result.stdout + result.stderr).decode("utf-8", errors="replace")[-8000:]
+    ok = result.returncode == 0
+    if ok:
+        check = _run_account_check(name, profile, slug)
+        _save_account_status([check])
+        ok = bool(check["ok"])
+        if not ok:
+            output += "\n[提示] token 已写入，但检查后仍处于未登录状态，请确认 token 完整、有效。"
+    return jsonify(
+        {
+            "ok": ok,
+            "output": output,
+            "accounts": _accounts_payload(),
+        }
+    )
+
+
+@app.post("/api/accounts/login")
+def account_login():
+    proc = JOB.get("proc")
+    if proc is not None and proc.poll() is None:
+        return _api_error("任务运行中，先停止任务再登录账号", 409)
+    current = LOGIN_JOB.get("proc")
+    if current is not None and current.poll() is None:
+        return _api_error("已有登录窗口在等待完成，请先完成或关闭它", 409)
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return _api_error("请指定要登录的账号")
+    accounts = _load_accounts()
+    profiles = accounts.get("profiles") or []
+    target = next((item for item in profiles if item["name"] == name), None)
+    if target is None:
+        return _api_error("账号不存在", 404)
+    profile = Path(target["profile_dir"])
+    slug = _account_slug(name, profiles.index(target) + 1)
+    config_path = _account_login_config(profile, slug)
+    login_proc = subprocess.Popen(
+        [sys.executable, "-m", "src.main", "--config", str(config_path), "login-watch"],
+        cwd=str(ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    LOGIN_JOB["name"] = name
+    LOGIN_JOB["proc"] = login_proc
+    try:
+        raw, _ = login_proc.communicate(timeout=700)
+    except subprocess.TimeoutExpired:
+        login_proc.kill()
+        raw, _ = login_proc.communicate()
+    finally:
+        LOGIN_JOB["proc"] = None
+        LOGIN_JOB["name"] = ""
+    output = raw.decode("utf-8", errors="replace")[-8000:]
+    ok = False
+    for line in output.splitlines():
+        if line.startswith("__LOGIN_RESULT__"):
+            try:
+                ok = bool(json.loads(line[len("__LOGIN_RESULT__") :]).get("ok"))
+            except Exception:  # noqa: BLE001
+                ok = False
+    if ok:
+        check = _run_account_check(name, profile, slug)
+        _save_account_status([check])
+        ok = bool(check["ok"])
+        if not ok:
+            output += "\n[提示] 检测到登录，但复查未通过，请确认窗口里已进入聊天页。"
+    return jsonify({"ok": ok, "output": output, "accounts": _accounts_payload()})
 
 
 @app.get("/api/session/status")

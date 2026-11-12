@@ -262,6 +262,8 @@ def normalize_record(record: dict, fields: list[str]) -> dict:
             value = ""
         elif not isinstance(value, str):
             value = str(value)
-        value = re.sub(r"\[\s*citation\s*:\s*\d+\s*\]", "", value, flags=re.I).strip()
+        value = re.sub(
+            r"[\[【]\s*(?:citation|reference)\s*[:：]\s*\d+\s*[\]】]", "", value, flags=re.I
+        ).strip()
         out[field] = value
     return out

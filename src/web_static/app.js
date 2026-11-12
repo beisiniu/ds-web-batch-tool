@@ -15,14 +15,36 @@ const DOMAINS = {
   },
   institution: {
     label: '机构',
-    sub: '官网 / 类型 / 地区',
+    sub: '档案 / 官网 / 沿革',
     match: 'name',
+    batch: 10,
     fields: [
-      { key: 'name', desc: '机构名称，必须原样保留我给出的名称' },
-      { key: 'official_url', desc: '机构官方网站 URL' },
-      { key: 'country', desc: '所在国家/地区' },
-      { key: 'type', desc: '机构类型，例如 高校、研究所、企业、政府机构' },
-      { key: 'source_notes', desc: '判断依据与备注；同名机构必须写明如何区分' },
+      { key: 'name', desc: '机构中文全称，必须原样保留我给出的名称，不要翻译、改写、增删括号' },
+      { key: 'name_en', desc: '官网英文版或官方英文资料中的名称；没有官方英文名时给通用规范译名，不要生造缩写' },
+      { key: 'name_used', desc: '正式更名前使用过的名称，按时间先后；前身/起源机构不算曾用名' },
+      { key: 'abbreviation_name', desc: '官方简称或通用缩写，多个用"; "分隔' },
+      { key: 'homepage', desc: '机构官方网站首页 URL，优先一级域名；不要填百科、新闻或第三方黄页' },
+      { key: 'type', desc: '机构类型，只能填 教育机构 / 科研机构 / 医疗机构 / 企业 / 政府机构 / 其他' },
+      { key: 'founding_date', desc: '批准设立（创办）日期，优先批准/批复日期；只知年份填 YYYY，知道月日填 YYYY/M/D' },
+      { key: 'death_date', desc: '撤销、停办或注销日期；仍存续则留空；格式同成立日期' },
+      { key: 'change_date', desc: '更名、合并、升格、迁址等重大变更日期，按时间先后，多个用"; "分隔' },
+      { key: 'country', desc: '国家代码，中国填 CN（ISO 3166-1 alpha-2）' },
+      { key: 'province', desc: '省级行政区全称，如 辽宁省、广西壮族自治区' },
+      { key: 'city', desc: '地级市（地区/州/盟）名称' },
+      { key: 'address', desc: '详细地址，写到省市区和街道门牌，不要只写城市名' },
+      { key: 'postal_code', desc: '邮政编码，6 位数字' },
+      { key: 'intro', desc: '机构简介 100~300 字：性质、隶属、历史沿革、规模、主要职能，只写可核实事实' },
+      { key: 'research_area', desc: '研究领域、学科方向或主要业务，尽量列全，多个用"; "分隔' },
+      { key: 'honor', desc: '官方公布的荣誉、称号、资质、获奖，尽量列全并保留原名称，多个用"; "分隔' },
+      { key: 'institution_sub', desc: '具有独立建制的下属单位（附属学校、研究所、分院等）；不要填内设部门、科室、办公室，多个用"; "分隔' },
+      { key: 'institution_superior', desc: '上级机构，多个用"; "分隔' },
+      { key: 'institution_related', desc: '相关机构（合作、共建、关联单位），多个用"; "分隔' },
+      { key: 'governing_department', desc: '主管部门或举办单位，写全称' },
+      { key: 'phone', desc: '官网公布的官方联系电话，逐位核对并保留区号，多个用"; "分隔' },
+      { key: 'email', desc: '官方公布的电子邮箱，逐字核对，多个用"; "分隔' },
+      { key: 'leader', desc: '现任主要负责人姓名，多人用"; "分隔，可附职务，如 张三（校长）' },
+      { key: 'language', desc: '工作语言代码，中文机构填 zho（ISO 639-3）' },
+      { key: 'is_replaced_by', desc: '若机构已撤销或并入其他机构，填取代它的机构全称；否则留空' },
     ],
   },
   scholar: {
@@ -170,6 +192,7 @@ function renderDomains() {
 function selectDomain(domain) {
   state.domain = domain;
   state.fields = clone(DOMAINS[domain].fields);
+  $('batchSize').value = DOMAINS[domain].batch || 50;
   state.customPreamble = false;
   $('editPreambleCheck').checked = false;
   $('preambleEdit').classList.add('hidden');
@@ -401,6 +424,7 @@ function showRunView(task) {
   $('pageSub').textContent = '进度、日志与结果都在这里';
   $('runTitle').textContent = task.name || '任务';
   $('runSub').textContent = `${task.total || 0} 条 · 每批 ${task.batch_size || 50} 条 · ${task.fields_count || (task.fields || []).length} 个字段`;
+  setRunSettingsInputs(task);
   updateCounts(task.counts || { ok: 0, failed: 0, pending: task.total || 0, total: task.total || 0 });
   setJobLabel(task.job || 'pending');
   setAccountPill((task.state && task.state.active_account) || task.active_account || '');
@@ -409,6 +433,39 @@ function showRunView(task) {
   startPolling(task.id);
   loadResults(task.id);
   renderTaskList();
+}
+
+function setRunSettingsInputs(task) {
+  const cooldown = task.cooldown_sec || [8, 25];
+  $('runBatchSize').value = task.batch_size || 50;
+  $('runRotateEvery').value = task.rotate_every_batches ?? 8;
+  $('runCooldownMin').value = cooldown[0] ?? 8;
+  $('runCooldownMax').value = cooldown[1] ?? 25;
+}
+
+async function applyRunSettings() {
+  if (!state.task) return;
+  const button = $('applyRunSettingsBtn');
+  button.disabled = true;
+  try {
+    const data = await api(`/api/tasks/${state.task.id}/settings`, {
+      method: 'POST',
+      json: {
+        batch_size: Number($('runBatchSize').value),
+        rotate_every_batches: Number($('runRotateEvery').value),
+        cooldown_min: Number($('runCooldownMin').value),
+        cooldown_max: Number($('runCooldownMax').value),
+      },
+    });
+    state.task = { ...state.task, ...data.task };
+    $('runSub').textContent = `${data.task.total || 0} 条 · 每批 ${data.task.batch_size} 条 · ${data.task.fields_count || (data.task.fields || []).length} 个字段`;
+    setRunSettingsInputs(data.task);
+    toast(data.running ? '参数已应用，将在下一批生效' : '参数已保存，下次开始生效', 'ok');
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function setJobLabel(job) {
@@ -805,6 +862,12 @@ async function loadAccounts() {
   renderAccounts();
 }
 
+function accountStatus(account) {
+  if (account.ok === true) return { icon: '✓', cls: 'ok', tip: '登录可用' };
+  if (account.ok === false) return { icon: '×', cls: 'bad', tip: '登录已失效，请更新 Token' };
+  return { icon: '?', cls: 'unknown', tip: '尚未检查登录状态' };
+}
+
 function renderAccounts() {
   const list = $('accountList');
   if (list) {
@@ -818,12 +881,35 @@ function renderAccounts() {
       state.accounts.forEach((account) => {
         const item = document.createElement('div');
         item.className = 'account-item';
+
+        const status = accountStatus(account);
+        const badge = document.createElement('span');
+        badge.className = `account-status ${status.cls}`;
+        badge.textContent = status.icon;
+        badge.title = account.checked_at ? `${status.tip}（检查于 ${account.checked_at}）` : status.tip;
+
+        const main = document.createElement('div');
+        main.className = 'account-main';
         const name = document.createElement('b');
         name.textContent = account.name;
         const path = document.createElement('span');
         path.textContent = account.profile_dir;
         path.title = account.profile_dir;
-        item.append(name, path);
+        main.append(name, path);
+
+        const direct = document.createElement('button');
+        direct.type = 'button';
+        direct.className = 'btn soft small';
+        direct.textContent = '直接登录';
+        direct.addEventListener('click', () => directLogin(account.name));
+
+        const update = document.createElement('button');
+        update.type = 'button';
+        update.className = 'btn ghost small';
+        update.textContent = '更新 Token';
+        update.addEventListener('click', () => updateAccountToken(account.name));
+
+        item.append(badge, main, direct, update);
         list.appendChild(item);
       });
     }
@@ -873,9 +959,85 @@ async function addAccount() {
   }
 }
 
+async function directLogin(name) {
+  const proceed = confirm(
+    `将打开一个 Chrome 窗口，用账号「${name}」登录 DeepSeek。\n\n` +
+      '请用微信扫码或手机验证码完成登录，检测到登录后窗口会自动关闭。\n\n继续？'
+  );
+  if (!proceed) return;
+  const spinner = $('addAccountSpinner');
+  const output = $('addAccountOutput');
+  spinner.textContent = `等待「${name}」登录：请在弹出的 Chrome 窗口完成登录，不要关闭窗口...`;
+  spinner.classList.remove('hidden');
+  output.classList.add('hidden');
+  try {
+    const data = await api('/api/accounts/login', { method: 'POST', json: { name } });
+    output.textContent = data.output || '';
+    output.classList.remove('hidden');
+    if (data.accounts) state.accounts = data.accounts;
+    renderAccounts();
+    if (data.ok) toast(`「${name}」登录成功`, 'ok');
+    else toast('未检测到登录，请重试', 'error');
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    spinner.textContent = '正在导入并验证，约 10~45 秒...';
+    spinner.classList.add('hidden');
+  }
+}
+
+async function updateAccountToken(name) {
+  const proceed = confirm(
+    `请先在已登录 DeepSeek 的浏览器里复制登录状态到剪贴板。\n\n现在更新账号「${name}」的 token？`
+  );
+  if (!proceed) return;
+  const spinner = $('addAccountSpinner');
+  const output = $('addAccountOutput');
+  spinner.textContent = `正在更新「${name}」的登录状态，约 10~45 秒...`;
+  spinner.classList.remove('hidden');
+  output.classList.add('hidden');
+  try {
+    const data = await api('/api/accounts/update', { method: 'POST', json: { name } });
+    output.textContent = data.output || '';
+    output.classList.remove('hidden');
+    if (data.accounts) state.accounts = data.accounts;
+    renderAccounts();
+    if (data.ok) toast(`「${name}」token 已更新`, 'ok');
+    else toast('更新失败，请查看下方输出', 'error');
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    spinner.textContent = '正在导入并验证，约 10~45 秒...';
+    spinner.classList.add('hidden');
+  }
+}
+
+async function checkAccounts(silent = false) {
+  const button = $('checkAccountsBtn');
+  if (button) {
+    button.disabled = true;
+    button.textContent = '检查中...';
+  }
+  try {
+    const data = await api('/api/accounts/check', { method: 'POST' });
+    state.accounts = data.accounts || state.accounts;
+    renderAccounts();
+    if (!silent) toast('账号状态已更新', 'ok');
+  } catch (error) {
+    if (!silent) toast(error.message, 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = '检查状态';
+    }
+  }
+}
+
 function openLogin() {
   $('loginModal').classList.remove('hidden');
-  loadAccounts();
+  loadAccounts().then(() => {
+    if (state.accounts.length) checkAccounts(true);
+  });
 }
 
 function closeLogin() {
@@ -966,6 +1128,8 @@ function bindEvents() {
   $('closeLoginBtn').addEventListener('click', closeLogin);
   $('importSessionBtn').addEventListener('click', importSession);
   $('addAccountBtn').addEventListener('click', addAccount);
+  $('checkAccountsBtn').addEventListener('click', () => checkAccounts(false));
+  $('applyRunSettingsBtn').addEventListener('click', applyRunSettings);
   $('loginModal').addEventListener('click', (event) => {
     if (event.target === $('loginModal')) closeLogin();
   });

@@ -207,6 +207,13 @@
           <div><b id="statPending">0</b><span>待处理</span></div>
           <div><b id="statPct">0%</b><span>完成度</span></div>
         </div>
+        <div class="run-settings">
+          <label>每批 <input id="runBatchSize" type="number" min="1" max="500"></label>
+          <label>会话轮换 <input id="runRotateEvery" type="number" min="0" max="100"></label>
+          <label>批间隔 <input id="runCooldownMin" type="number" min="0" max="600"> ~ <input id="runCooldownMax" type="number" min="0" max="600"> 秒</label>
+          <button class="btn ghost small" id="applyRunSettingsBtn" type="button">应用参数</button>
+          <span class="micro">运行中修改，下一批生效，进度不受影响</span>
+        </div>
       </div>
 
       <div id="verifyBanner" class="callout hidden">
@@ -266,9 +273,11 @@
     <div class="account-pool">
       <div class="pool-head">
         <b>账号池</b>
-        <span class="micro">任务卡住或限流时会自动切换</span>
+        <span class="micro">✓ 可用 · × 需更新 token</span>
+        <button class="btn ghost small" id="checkAccountsBtn" type="button">检查状态</button>
       </div>
       <div id="accountList" class="account-list"></div>
+      <p class="micro">状态为 × 的账号：点「直接登录」在弹出的 Chrome 里扫码/验证码登录；或复制新 token 后点「更新 Token」。</p>
       <div class="pool-add">
         <input id="newAccountName" type="text" placeholder="新账号名称，例如 备用2" maxlength="40">
         <button class="btn soft small" id="addAccountBtn" type="button">从剪贴板导入并添加</button>

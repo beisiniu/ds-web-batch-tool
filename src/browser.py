@@ -174,7 +174,7 @@ class DeepSeekBrowser:
                 self.context = self.playwright.chromium.launch_persistent_context(
                     user_data_dir=str(self.profile_dir),
                     channel=channel,
-                    headless=False,
+                    headless=bool(browser_cfg.get("headless", False)),
                     no_viewport=True,
                     locale="zh-CN",
                     chromium_sandbox=True,
@@ -497,9 +497,11 @@ class DeepSeekBrowser:
         except PWError:
             pass
 
-    def ask(self, text: str, label: str = "", force_resend: bool = False) -> Reply:
+    def ask(self, text: str, label: str = "", force_resend: bool = False, expect_json: bool = False) -> Reply:
         if self._verification_visible():
             self._wait_for_human_verification()
+        if self._stop_visible():
+            self.cancel_generation()
         if not force_resend:
             token = self._extract_batch_token(text)
             if token:
@@ -526,7 +528,7 @@ class DeepSeekBrowser:
         loc.press("Enter")
         self._wait_sent(loc, before)
 
-        dom = self._wait_answer(before, text, before_text)
+        dom = self._wait_answer(before, text, before_text, expect_json=expect_json)
         sse = ""
         if self._finished_request is not None:
             try:
@@ -620,7 +622,7 @@ class DeepSeekBrowser:
         self.page.mouse.click(point["x"], point["y"])
         return True
 
-    def _wait_answer(self, before: int, sent_text: str = "", before_text: str = "") -> dict:
+    def _wait_answer(self, before: int, sent_text: str = "", before_text: str = "", expect_json: bool = False) -> dict:
         timeout = float(self.cfg["deepseek"]["response_timeout_sec"])
         start = time.time()
         paused_total = 0.0
@@ -655,7 +657,12 @@ class DeepSeekBrowser:
                     last_change = time.time()
                 finished = self._finished_at is not None and self._finished_at > self._sent_at
                 stable = time.time() - last_change
-                if not self._stop_visible() and (finished or stable >= self.stable_sec):
+                has_json = ("[" in text and "]" in text) or bool(result.get("code", "").strip())
+                if expect_json and not has_json:
+                    if stable > 90:
+                        self.logger.warning("回答已稳定但仍未出现 JSON，先返回交给重试逻辑处理")
+                        return result
+                elif not self._stop_visible() and (finished or stable >= self.stable_sec):
                     self.page.wait_for_timeout(1200)
                     final = self._read_last()
                     final_text = final.get("code") or final.get("full") or ""
